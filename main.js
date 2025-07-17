@@ -75,7 +75,6 @@ const clearSessionCommand = require('./commands/clearsession');
 const { autoStatusCommand, handleStatusUpdate } = require('./commands/autostatus');
 const { simpCommand } = require('./commands/simp');
 const { stupidCommand } = require('./commands/stupid');
-const pairCommand = require('./commands/pair');
 const stickerTelegramCommand = require('./commands/stickertelegram');
 const textmakerCommand = require('./commands/textmaker');
 const { handleAntideleteCommand, handleMessageRevocation, storeMessage } = require('./commands/antidelete');
@@ -94,6 +93,7 @@ const { goodnightCommand } = require('./commands/goodnight');
 const { shayariCommand } = require('./commands/shayari');
 const { rosedayCommand } = require('./commands/roseday');
 const imagineCommand = require('./commands/imagine');
+const videoCommand = require('./commands/video');
 
 
 // Global settings
@@ -138,13 +138,20 @@ async function handleMessages(sock, messageUpdate, printLog) {
         const senderId = message.key.participant || message.key.remoteJid;
         const isGroup = chatId.endsWith('@g.us');
 
-        let userMessage = message.message?.conversation?.trim().toLowerCase() ||
-            message.message?.extendedTextMessage?.text?.trim().toLowerCase() || '';
-        userMessage = userMessage.replace(/\.\s+/g, '.').trim();
+        const userMessage = (
+            message.message?.conversation?.trim() ||
+            message.message?.extendedTextMessage?.text?.trim() ||
+            message.message?.imageMessage?.caption?.trim() ||
+            message.message?.videoMessage?.caption?.trim() ||
+            ''
+        ).toLowerCase().replace(/\.\\s+/g, '.').trim();
 
         // Preserve raw message for commands like .tag that need original casing
         const rawText = message.message?.conversation?.trim() ||
-            message.message?.extendedTextMessage?.text?.trim() || '';
+            message.message?.extendedTextMessage?.text?.trim() ||
+            message.message?.imageMessage?.caption?.trim() ||
+            message.message?.videoMessage?.caption?.trim() ||
+            '';
 
         // Only log command usage
         if (userMessage.startsWith('.')) {
@@ -209,12 +216,12 @@ async function handleMessages(sock, messageUpdate, printLog) {
 
         // Check admin status only for admin commands in groups
         if (isGroup && isAdminCommand) {
-            const adminStatus = await isAdmin(sock, chatId, senderId);
+            const adminStatus = await isAdmin(sock, chatId, senderId, message);
             isSenderAdmin = adminStatus.isSenderAdmin;
             isBotAdmin = adminStatus.isBotAdmin;
 
             if (!isBotAdmin) {
-                await sock.sendMessage(chatId, { text: 'Please make the bot an admin to use admin commands.', ...channelInfo });
+                await sock.sendMessage(chatId, { text: 'Please make the bot an admin to use admin commands.', ...channelInfo }, {quoted: message});
                 return;
             }
 
@@ -293,7 +300,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 await unbanCommand(sock, chatId, message);
                 break;
             case userMessage === '.help' || userMessage === '.menu' || userMessage === '.bot' || userMessage === '.list':
-                await helpCommand(sock, chatId, global.channelLink);
+                await helpCommand(sock, chatId, message, global.channelLink);
                 break;
             case userMessage === '.sticker' || userMessage === '.s':
                 await stickerCommand(sock, chatId, message);
@@ -308,7 +315,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 break;
             case userMessage.startsWith('.tts'):
                 const text = userMessage.slice(4).trim();
-                await ttsCommand(sock, chatId, text);
+                await ttsCommand(sock, chatId, text, message);
                 break;
             case userMessage === '.delete' || userMessage === '.del':
                 await deleteCommand(sock, chatId, message, senderId);
@@ -369,9 +376,9 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 break;
             case userMessage === '.tagall':
                 if (isSenderAdmin || message.key.fromMe) {
-                    await tagAllCommand(sock, chatId, senderId);
+                    await tagAllCommand(sock, chatId, senderId, message);
                 } else {
-                    await sock.sendMessage(chatId, { text: 'Sorry, only group admins can use the .tagall command.', ...channelInfo });
+                    await sock.sendMessage(chatId, { text: 'Sorry, only group admins can use the .tagall command.', ...channelInfo }, {quoted: message});
                 }
                 break;
             case userMessage.startsWith('.tag'):
@@ -397,16 +404,16 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 await handleAntilinkCommand(sock, chatId, userMessage, senderId, isSenderAdmin);
                 break;
             case userMessage === '.meme':
-                await memeCommand(sock, chatId);
+                await memeCommand(sock, chatId, message);
                 break;
             case userMessage === '.joke':
-                await jokeCommand(sock, chatId);
+                await jokeCommand(sock, chatId, message);
                 break;
             case userMessage === '.quote':
-                await quoteCommand(sock, chatId);
+                await quoteCommand(sock, chatId, message);
                 break;
             case userMessage === '.fact':
-                await factCommand(sock, chatId);
+                await factCommand(sock, chatId, message, message);
                 break;
             case userMessage.startsWith('.weather'):
                 const city = userMessage.slice(9).trim();
@@ -482,10 +489,10 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 await stupidCommand(sock, chatId, stupidQuotedMsg, stupidMentionedJid, senderId, stupidArgs);
                 break;
             case userMessage === '.dare':
-                await dareCommand(sock, chatId);
+                await dareCommand(sock, chatId, message);
                 break;
             case userMessage === '.truth':
-                await truthCommand(sock, chatId);
+                await truthCommand(sock, chatId, message);
                 break;
             case userMessage === '.clear':
                 if (isGroup) await clearCommand(sock, chatId);
@@ -499,10 +506,10 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 await demoteCommand(sock, chatId, mentionedJidListDemote, message);
                 break;
             case userMessage === '.ping':
-                await pingCommand(sock, chatId);
+                await pingCommand(sock, chatId, message);
                 break;
             case userMessage === '.alive':
-                await aliveCommand(sock, chatId);
+                await aliveCommand(sock, chatId, message);
                 break;
             case userMessage.startsWith('.blur'):
                 const quotedMessage = message.message?.extendedTextMessage?.contextInfo?.quotedMessage;
@@ -587,7 +594,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 await takeCommand(sock, chatId, message, takeArgs);
                 break;
             case userMessage === '.flirt':
-                await flirtCommand(sock, chatId);
+                await flirtCommand(sock, chatId, message);
                 break;
             case userMessage.startsWith('.character'):
                 await characterCommand(sock, chatId, message);
@@ -643,11 +650,6 @@ async function handleMessages(sock, messageUpdate, printLog) {
             case userMessage.startsWith('.simp'):
                 await simpCommand(sock, chatId, message);
                 break;
-            case userMessage.startsWith('.pair') || userMessage.startsWith('.rent'): {
-                const q = userMessage.split(' ').slice(1).join(' ');
-                await pairCommand(sock, chatId, message, q);
-                break;
-            }
             case userMessage.startsWith('.metallic'):
                 await textmakerCommand(sock, chatId, message, userMessage, 'metallic');
                 break;
@@ -728,6 +730,9 @@ async function handleMessages(sock, messageUpdate, printLog) {
             case userMessage.startsWith('.play') || userMessage.startsWith('.mp3') || userMessage.startsWith('.ytmp3') || userMessage.startsWith('.yts'):
                 await songCommand(sock, chatId, message);
                 break;
+            case userMessage.startsWith('.video') || userMessage.startsWith('.ytmp4'):
+                await videoCommand(sock, chatId, message);
+                break;
             case userMessage.startsWith('.tiktok') || userMessage.startsWith('.tt'):
                 await tiktokCommand(sock, chatId, message);
                 break;
@@ -747,17 +752,38 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 await handleAreactCommand(sock, chatId, message, isOwner);
                 break;
             case userMessage === '.goodnight' || userMessage === '.lovenight' || userMessage === '.gn':
-                await goodnightCommand(sock, chatId);
+                await goodnightCommand(sock, chatId, message);
                 break;
             case userMessage === '.shayari' || userMessage === '.shayri':
-                await shayariCommand(sock, chatId);
+                await shayariCommand(sock, chatId, message);
                 break;
             case userMessage === '.roseday':
-                await rosedayCommand(sock, chatId);
+                await rosedayCommand(sock, chatId, message);
                 break;
             case userMessage.startsWith('.imagine') || userMessage.startsWith('.flux') || userMessage.startsWith('.dalle'):
                 await imagineCommand(sock, chatId, message);
                 break;
+            case userMessage === '.jid':
+                await groupJidCommand(sock, chatId, message);
+                break;
+
+                // Function to handle .groupjid command
+                async function groupJidCommand(sock, chatId, message) {
+                    const groupJid = message.key.remoteJid;
+
+                    if (!groupJid.endsWith('@g.us')) {
+                        return await sock.sendMessage(chatId, {
+                            text: "❌ This command can only be used in a group."
+                        });
+                    }
+
+                    await sock.sendMessage(chatId, {
+                        text: `✅ Group JID: ${groupJid}`
+                    }, {
+                        quoted: message
+                    });
+                }
+
             default:
                 if (isGroup) {
                     // Handle non-command group messages
@@ -790,14 +816,6 @@ async function handleGroupParticipantUpdate(sock, update) {
     try {
         const { id, participants, action, author } = update;
 
-        // Debug log for group updates
-        /* console.log('Group Update in Main:', {
-             id,
-             participants,
-             action,
-             author
-         });*/
-
         // Check if it's a group
         if (!id.endsWith('@g.us')) return;
 
@@ -819,19 +837,37 @@ async function handleGroupParticipantUpdate(sock, update) {
             const isWelcomeEnabled = await isWelcomeOn(id);
             if (!isWelcomeEnabled) return;
 
+            // Get group metadata
+            const groupMetadata = await sock.groupMetadata(id);
+            const groupName = groupMetadata.subject;
+            const groupDesc = groupMetadata.desc || 'No description available';
+
             // Get welcome message from data
             const data = JSON.parse(fs.readFileSync('./data/userGroupData.json'));
             const welcomeData = data.welcome[id];
             const welcomeMessage = welcomeData?.message || 'Welcome {user} to the group! 🎉';
+            const channelId = welcomeData?.channelId || '120363161513685998@newsletter';
 
             // Send welcome message for each new participant
             for (const participant of participants) {
                 const user = participant.split('@')[0];
-                const formattedMessage = welcomeMessage.replace('{user}', `@${user}`);
+                const formattedMessage = welcomeMessage
+                    .replace('{user}', `@${user}`)
+                    .replace('{group}', groupName)
+                    .replace('{description}', groupDesc);
 
                 await sock.sendMessage(id, {
                     text: formattedMessage,
-                    mentions: [participant]
+                    mentions: [participant],
+                    contextInfo: {
+                        forwardingScore: 1,
+                        isForwarded: true,
+                        forwardedNewsletterMessageInfo: {
+                            newsletterJid: channelId,
+                            newsletterName: 'KnightBot MD',
+                            serverMessageId: -1
+                        }
+                    }
                 });
             }
         }
@@ -842,19 +878,35 @@ async function handleGroupParticipantUpdate(sock, update) {
             const isGoodbyeEnabled = await isGoodByeOn(id);
             if (!isGoodbyeEnabled) return;
 
+            // Get group metadata
+            const groupMetadata = await sock.groupMetadata(id);
+            const groupName = groupMetadata.subject;
+
             // Get goodbye message from data
             const data = JSON.parse(fs.readFileSync('./data/userGroupData.json'));
             const goodbyeData = data.goodbye[id];
             const goodbyeMessage = goodbyeData?.message || 'Goodbye {user} 👋';
+            const channelId = goodbyeData?.channelId || '120363161513685998@newsletter';
 
             // Send goodbye message for each leaving participant
             for (const participant of participants) {
                 const user = participant.split('@')[0];
-                const formattedMessage = goodbyeMessage.replace('{user}', `@${user}`);
+                const formattedMessage = goodbyeMessage
+                    .replace('{user}', `@${user}`)
+                    .replace('{group}', groupName);
 
                 await sock.sendMessage(id, {
                     text: formattedMessage,
-                    mentions: [participant]
+                    mentions: [participant],
+                    contextInfo: {
+                        forwardingScore: 1,
+                        isForwarded: true,
+                        forwardedNewsletterMessageInfo: {
+                            newsletterJid: channelId,
+                            newsletterName: 'KnightBot MD',
+                            serverMessageId: -1
+                        }
+                    }
                 });
             }
         }
